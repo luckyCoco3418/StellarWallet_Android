@@ -49,9 +49,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     Server server;
     KeyPair keyPair;
 
-    String TOKEN_CODE = "BTC"; //"RHT";
-    String TOKEN_ISSUER = "GCNSGHUCG5VMGLT5RIYYZSO7VQULQKAJ62QA33DBC5PPBSO57LFWVV6P"; //"GCLNYYCC226567NWO7RYVB3DKJ5E7QEBY7R5RC3EYXWQBIRWM7ISWF24";
-    String TOKEN_LIMIT = "100"; //"45000000";
+    String TOKEN_CODE = "XAMO";
+    String TOKEN_ISSUER = "GCKCIP3GMH6NUGSY6UIP4F6ROPVS2X7DXX6KVE6IFBGVARZFSAKTFCC3";
+    String TOKEN_LIMIT = "42500000";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -80,7 +80,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         button.setOnClickListener(this);
 
         initWallet();
-        new GetBalanceRunner().execute();
     }
 
     @Override
@@ -161,11 +160,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     return true;
                 }
             }
-//            return addTrustline();
-            return true;
+            return addTrustline();
         }
         @Override
         protected void onPostExecute(Boolean trusted) {
+            new GetBalanceRunner().execute();
         }
     }
 
@@ -240,7 +239,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             return transfer();
         }
         @Override
-        protected void onPostExecute(Boolean success) {}
+        protected void onPostExecute(Boolean success) {
+            if (success) {
+                new GetBalanceRunner().execute();
+            }
+        }
     }
 
     private boolean transfer() {
@@ -265,7 +268,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         Account account = new Account(address, accountResponse.getSequenceNumber());
         Transaction.Builder builder = new Transaction.Builder(account, Network.PUBLIC)
                 .addOperation(operation)
-                .addMemo(Memo.text("Test transfer"))
+                .addMemo(Memo.text("Transfer test"))
                 .setBaseFee(Transaction.MIN_BASE_FEE)
                 .setTimeout(Transaction.Builder.TIMEOUT_INFINITE);
         Transaction transaction = builder.build();
