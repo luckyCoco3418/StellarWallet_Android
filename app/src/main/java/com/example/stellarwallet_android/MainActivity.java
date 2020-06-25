@@ -22,6 +22,7 @@ import org.stellar.sdk.AssetTypeCreditAlphaNum4;
 import org.stellar.sdk.AssetTypeNative;
 import org.stellar.sdk.Asset;
 import org.stellar.sdk.ChangeTrustOperation;
+import org.stellar.sdk.PaymentOperation;
 import org.stellar.sdk.KeyPair;
 import org.stellar.sdk.Server;
 import org.stellar.sdk.Account;
@@ -34,7 +35,7 @@ import org.stellar.sdk.requests.ErrorResponse;
 
 import java.io.IOException;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements View.OnClickListener {
 
     TextView txSecret;
     TextView txAddress;
@@ -46,7 +47,6 @@ public class MainActivity extends AppCompatActivity {
     String seed, address;
 
     Server server;
-    AccountResponse sourceAccount;
     KeyPair keyPair;
 
     String TOKEN_CODE = "BTC"; //"RHT";
@@ -77,7 +77,7 @@ public class MainActivity extends AppCompatActivity {
         ebAmount = (EditText)findViewById(R.id.send_amount);
 
         Button button = (Button)findViewById(R.id.send);
-        button.setOnClickListener(onSendClicked);
+        button.setOnClickListener(this);
 
         initWallet();
         new GetBalanceRunner().execute();
@@ -137,27 +137,35 @@ public class MainActivity extends AppCompatActivity {
         new AddTrustlineRunner().execute();
     }
 
+    private AccountResponse GetAccountResponse() {
+        try {
+            return this.server.accounts().account(this.address);
+        } catch (ErrorResponse e1) {
+            e1.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
     private class AddTrustlineRunner extends AsyncTask<Void, Void, Boolean> {
         @Override
         protected Boolean doInBackground(Void... params) {
-            try {
-                sourceAccount = server.accounts().account(address);
-            } catch (ErrorResponse e1) {
-                e1.printStackTrace();
-                return false;
-            } catch (IOException e) {
-                e.printStackTrace();
+            AccountResponse accountResponse = GetAccountResponse();
+            if (accountResponse == null) {
                 return false;
             }
-            for (AccountResponse.Balance balance : sourceAccount.getBalances()) {
+
+            for (AccountResponse.Balance balance : accountResponse.getBalances()) {
                 if (TOKEN_CODE.equals(balance.getAssetCode()) && TOKEN_ISSUER.equals(balance.getAssetIssuer())) {
                     return true;
                 }
             }
-            return addTrustline();
+//            return addTrustline();
+            return true;
         }
         @Override
-        protected void onPostExecute(Boolean truested) {
+        protected void onPostExecute(Boolean trusted) {
         }
     }
 
@@ -168,7 +176,11 @@ public class MainActivity extends AppCompatActivity {
                 .setSourceAccount(address)
                 .build();
 
-        Account account = new Account(address, sourceAccount.getSequenceNumber());
+        AccountResponse accountResponse = GetAccountResponse();
+        if (accountResponse == null) {
+            return false;
+        }
+        Account account = new Account(address, accountResponse.getSequenceNumber());
         Transaction.Builder builder = new Transaction.Builder(account, Network.PUBLIC)
                 .addOperation(operation)
 //                .addMemo(Memo.text("Add trustline"))
@@ -191,24 +203,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String getBalance() {
-        String balances = "";
-        AccountResponse account = null;
-        try {
-            account = this.server.accounts().account(this.address);
-        } catch (ErrorResponse e1) {
-            e1.printStackTrace();
-            return "";
-        } catch (IOException e) {
-            e.printStackTrace();
+        AccountResponse accountResponse = GetAccountResponse();
+        if (accountResponse == null) {
             return "";
         }
-        for (AccountResponse.Balance balance : account.getBalances()) {
+
+        String balances = "";
+        for (AccountResponse.Balance balance : accountResponse.getBalances()) {
             balances = balances + String.format("Type: %s, Code: %s, Balance: %s\n",
                     balance.getAssetType(),
                     balance.getAssetCode(),
                     balance.getBalance());
         }
-
         return balances;
     }
 
@@ -223,11 +229,59 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private View.OnClickListener onSendClicked = new View.OnClickListener() {
-        public void onClick(View v) {
-            String toAddress = ebToAddress.getText().toString();
-            String symbol = ebSymbol.getText().toString();
-            String amount = ebAmount.getText().toString();
+    @Override
+    public void onClick(View v) {
+        new TransferRunner().execute();
+    }
+
+    private class TransferRunner extends AsyncTask<Void, Void, Boolean> {
+        @Override
+        protected Boolean doInBackground(Void... params) {
+            return transfer();
         }
-    };
+        @Override
+        protected void onPostExecute(Boolean success) {}
+    }
+
+    private boolean transfer() {
+        String toAddress = ebToAddress.getText().toString();
+        String amount = ebAmount.getText().toString();
+        String symbol = ebSymbol.getText().toString();
+        Asset asset;
+        if (symbol.equals(TOKEN_CODE)) {
+            asset = new AssetTypeCreditAlphaNum4(TOKEN_CODE, TOKEN_ISSUER);
+        } else {
+            asset = new AssetTypeNative();
+        }
+
+        PaymentOperation operation = new PaymentOperation.Builder(toAddress, asset, amount)
+                .setSourceAccount(address)
+                .build();
+
+        AccountResponse accountResponse = GetAccountResponse();
+        if (accountResponse == null) {
+            return false;
+        }
+        Account account = new Account(address, accountResponse.getSequenceNumber());
+        Transaction.Builder builder = new Transaction.Builder(account, Network.PUBLIC)
+                .addOperation(operation)
+                .addMemo(Memo.text("Test transfer"))
+                .setBaseFee(Transaction.MIN_BASE_FEE)
+                .setTimeout(Transaction.Builder.TIMEOUT_INFINITE);
+        Transaction transaction = builder.build();
+        transaction.sign(keyPair);
+
+        try {
+            SubmitTransactionResponse response = server.submitTransaction(transaction);
+            boolean success = response.isSuccess();
+            return success;
+        } catch (AccountRequiresMemoException e1) {
+            e1.printStackTrace();
+        } catch (IOException e) {
+            // expect exception
+            e.printStackTrace();
+        }
+        return false;
+    }
+
 }
