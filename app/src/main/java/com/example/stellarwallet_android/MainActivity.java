@@ -12,11 +12,25 @@ import androidx.appcompat.widget.Toolbar;
 import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.TextView;
 
+import org.stellar.sdk.AccountRequiresMemoException;
+import org.stellar.sdk.AssetTypeCreditAlphaNum12;
+import org.stellar.sdk.AssetTypeCreditAlphaNum4;
+import org.stellar.sdk.AssetTypeNative;
+import org.stellar.sdk.Asset;
+import org.stellar.sdk.ChangeTrustOperation;
 import org.stellar.sdk.KeyPair;
 import org.stellar.sdk.Server;
+import org.stellar.sdk.Account;
 import org.stellar.sdk.responses.AccountResponse;
+import org.stellar.sdk.Transaction;
+import org.stellar.sdk.Network;
+import org.stellar.sdk.Memo;
+import org.stellar.sdk.responses.SubmitTransactionResponse;
+import org.stellar.sdk.requests.ErrorResponse;
 
 import java.io.IOException;
 
@@ -25,9 +39,19 @@ public class MainActivity extends AppCompatActivity {
     TextView txSecret;
     TextView txAddress;
     TextView txBalance;
+    EditText ebToAddress;
+    EditText ebSymbol;
+    EditText ebAmount;
 
     String seed, address;
+
     Server server;
+    AccountResponse sourceAccount;
+    KeyPair keyPair;
+
+    String TOKEN_CODE = "BTC"; //"RHT";
+    String TOKEN_ISSUER = "GCNSGHUCG5VMGLT5RIYYZSO7VQULQKAJ62QA33DBC5PPBSO57LFWVV6P"; //"GCLNYYCC226567NWO7RYVB3DKJ5E7QEBY7R5RC3EYXWQBIRWM7ISWF24";
+    String TOKEN_LIMIT = "100"; //"45000000";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,11 +69,17 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        this.txSecret = (TextView) findViewById(R.id.secret);
-        this.txAddress = (TextView) findViewById(R.id.address);
-        this.txBalance = (TextView) findViewById(R.id.balance);
+        txSecret = (TextView) findViewById(R.id.secret);
+        txAddress = (TextView) findViewById(R.id.address);
+        txBalance = (TextView) findViewById(R.id.balance);
+        ebToAddress = (EditText)findViewById(R.id.to_address);
+        ebSymbol = (EditText)findViewById(R.id.symbol);
+        ebAmount = (EditText)findViewById(R.id.send_amount);
 
-        this.initWallet();
+        Button button = (Button)findViewById(R.id.send);
+        button.setOnClickListener(onSendClicked);
+
+        initWallet();
         new GetBalanceRunner().execute();
     }
 
@@ -93,16 +123,71 @@ public class MainActivity extends AppCompatActivity {
 
         if (this.seed.length() == 0) {
             // create a new pair
-            KeyPair pair = KeyPair.random();
-            this.seed = new String(pair.getSecretSeed());
-            this.address = pair.getAccountId();
+            this.keyPair = KeyPair.random();
+            this.seed = new String(this.keyPair.getSecretSeed());
+            this.address = this.keyPair.getAccountId();
         } else {
-            KeyPair pair = KeyPair.fromSecretSeed(seed);
-            this.address = pair.getAccountId();
+            this.keyPair = KeyPair.fromSecretSeed(seed);
+            this.address = this.keyPair.getAccountId();
         }
 
         this.txSecret.setText(this.seed);
         this.txAddress.setText(this.address);
+
+        new AddTrustlineRunner().execute();
+    }
+
+    private class AddTrustlineRunner extends AsyncTask<Void, Void, Boolean> {
+        @Override
+        protected Boolean doInBackground(Void... params) {
+            try {
+                sourceAccount = server.accounts().account(address);
+            } catch (ErrorResponse e1) {
+                e1.printStackTrace();
+                return false;
+            } catch (IOException e) {
+                e.printStackTrace();
+                return false;
+            }
+            for (AccountResponse.Balance balance : sourceAccount.getBalances()) {
+                if (TOKEN_CODE.equals(balance.getAssetCode()) && TOKEN_ISSUER.equals(balance.getAssetIssuer())) {
+                    return true;
+                }
+            }
+            return addTrustline();
+        }
+        @Override
+        protected void onPostExecute(Boolean truested) {
+        }
+    }
+
+    private boolean addTrustline() {
+        Asset asset = new AssetTypeCreditAlphaNum4(TOKEN_CODE, TOKEN_ISSUER);
+
+        ChangeTrustOperation operation = new ChangeTrustOperation.Builder(asset, TOKEN_LIMIT)
+                .setSourceAccount(address)
+                .build();
+
+        Account account = new Account(address, sourceAccount.getSequenceNumber());
+        Transaction.Builder builder = new Transaction.Builder(account, Network.PUBLIC)
+                .addOperation(operation)
+//                .addMemo(Memo.text("Add trustline"))
+                .setBaseFee(Transaction.MIN_BASE_FEE)
+                .setTimeout(Transaction.Builder.TIMEOUT_INFINITE);
+        Transaction transaction = builder.build();
+        transaction.sign(keyPair);
+
+        try {
+            SubmitTransactionResponse response = server.submitTransaction(transaction);
+            boolean success = response.isSuccess();
+            return success;
+        } catch (AccountRequiresMemoException e1) {
+            e1.printStackTrace();
+        } catch (IOException e) {
+            // expect exception
+            e.printStackTrace();
+        }
+        return false;
     }
 
     private String getBalance() {
@@ -110,6 +195,9 @@ public class MainActivity extends AppCompatActivity {
         AccountResponse account = null;
         try {
             account = this.server.accounts().account(this.address);
+        } catch (ErrorResponse e1) {
+            e1.printStackTrace();
+            return "";
         } catch (IOException e) {
             e.printStackTrace();
             return "";
@@ -134,4 +222,12 @@ public class MainActivity extends AppCompatActivity {
             txBalance.setText(balances);
         }
     }
+
+    private View.OnClickListener onSendClicked = new View.OnClickListener() {
+        public void onClick(View v) {
+            String toAddress = ebToAddress.getText().toString();
+            String symbol = ebSymbol.getText().toString();
+            String amount = ebAmount.getText().toString();
+        }
+    };
 }
